@@ -99,7 +99,7 @@ class Clustering(nn.Module):
         # softplus(x) = 1/B log_e (1 + exp(B*x))
         softplus_reverse = torch.log(torch.exp(init_covs_diag * 1) - 1)
             
-        # Cov = I + softplus(add_var)
+        # Cov = I * softplus(add_var)
         self.add_var = nn.Parameter(softplus_reverse)
         
         activation = nn.ReLU
@@ -112,7 +112,7 @@ class Clustering(nn.Module):
         
 
     def get_cov(self):
-        # Cov = I + softplus(add_var)
+        # Cov = I * softplus(add_var)
         sigma = self.identity_var*F.softplus(self.add_var)
         return sigma
 
