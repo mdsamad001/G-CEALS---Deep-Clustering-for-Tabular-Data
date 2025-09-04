@@ -1048,7 +1048,7 @@ if __name__ == "__main__":
     acc = metrics.acc(y_actual, y_pred)
     nmi = metrics.nmi(y_actual, y_pred)
     ari = metrics.ari(y_actual, y_pred)
-    ch_score_manual = compute_ch_index(z, y_actual)
+
     
     # print('centroids')
     # print(model.centroids)
