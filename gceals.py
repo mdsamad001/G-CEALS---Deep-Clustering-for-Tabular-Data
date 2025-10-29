@@ -79,7 +79,6 @@ def gceals_cluster_assignment(z, centroids, sigma_inv=None):
     q = F.softmax(-d_final, dim=1)
     return q
 
-
 # Network
 # x-500-500-2000-10=2000-500-500=x_hat;
 
@@ -250,7 +249,6 @@ class Clustering(nn.Module):
         # # print(sigma)
         return sigma
 
-    
     def get_idec_q(self, z):
         '''IDEC cluster assignment using t-distribution'''
         q = 1.0 / (1.0 + torch.sum(torch.pow(z.unsqueeze(1) -
@@ -307,8 +305,8 @@ class Clustering(nn.Module):
     def forward(self, x):
         z, x_hat = self.ae(x)
         
-        q1 = self.cluster_output(z) #posterior probability distribution over all clusters 
-        q2 = self.softmax_output(z) #softmax predictions
+        q1 = self.cluster_output(z)
+        q2 = self.softmax_output(z)
             
         return q1, x_hat, q2
 
@@ -585,6 +583,13 @@ def train(ae_model, data_tensor, y_actual, args):
     full_z_list = []
     y_pred_list = []
     update_epoch_list = []
+    
+    sum_delta_centroids = np.nan
+    sum_det_sigma = np.nan
+    d_metric = np.nan
+    det_sigma_w_sum = np.nan
+    d_metric_w = np.nan
+
 
     pbar = tqdm(range(args.finetune_epochs+1))
     w = torch.tensor([1/args.n_clusters]*args.n_clusters).float().to(args.device)
@@ -595,8 +600,6 @@ def train(ae_model, data_tensor, y_actual, args):
     for epoch in pbar:
         gamma = args.gamma
         alpha = args.alpha
-        g_lambda = 0.01
-        g_lambda2 = 1.0
         # gamma = 0 epoch < arg.delay_gamma else args.gamma
         # epoch < args.delay_gamma or 
         
@@ -718,7 +721,6 @@ def train(ae_model, data_tensor, y_actual, args):
                 
             if args.use_w_softmax:
                 q2 = q2.mul(w)
-                
 
             ae_loss = criterion(
                 x_hat, batch_x) if not args.dec else torch.tensor(0)
@@ -971,7 +973,7 @@ if __name__ == "__main__":
                         help='')
     parser.add_argument('--init_on_tsne', action='store_true',
                         help='')
-    parser.add_argument('--stop_w_factor', default=0.5, type=float)
+    parser.add_argument('--stop_w_factor', default=0.1, type=float)
     parser.add_argument('--seed', default=42, type=int)
     args = parser.parse_args()
     # args.dataset = int(args.dataset)
@@ -1048,7 +1050,6 @@ if __name__ == "__main__":
     acc = metrics.acc(y_actual, y_pred)
     nmi = metrics.nmi(y_actual, y_pred)
     ari = metrics.ari(y_actual, y_pred)
-
     
     # print('centroids')
     # print(model.centroids)
