@@ -1000,6 +1000,9 @@ if __name__ == "__main__":
 
     start_time = time.time()
 
+    if args.latent_dim == 10:
+        print("⚠️ WARNING: Latent dimension is set to 10 (default). This may trigger latent similarity sensitivity.")
+
     X_actual, y_actual = get_data(args.dataset)
     n_classes = len(np.unique(y_actual))
     
