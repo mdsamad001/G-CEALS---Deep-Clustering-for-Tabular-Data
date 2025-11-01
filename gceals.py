@@ -762,8 +762,8 @@ def train(ae_model, data_tensor, y_actual, args):
                 if args.gini_loss:
                     c2_loss = gini_loss(q)
                     cov_loss += c2_loss
-                loss = ae_loss + (gamma * kl_loss) + (alpha * kl_loss2) + cov_loss
-                # loss = ae_loss + (alpha * kl_loss2) # dont use kld from cluster head / test
+               # loss = ae_loss + (gamma * kl_loss) + (alpha * kl_loss2) + cov_loss
+                loss = ae_loss + (alpha * kl_loss2) # dont use kld from cluster head / test
             else:
                 loss = (kl_loss)
                 
