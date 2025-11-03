@@ -92,7 +92,7 @@ class Clustering(nn.Module):
                      if init_covs == None else init_covs)
         
 
-        self.diag_mask = torch.eye(self.ae.output_level, device=args.device).unsqueeze(0).expand(init_covs.shape)
+        #self.diag_mask = torch.eye(self.ae.output_level, device=args.device).unsqueeze(0).expand(init_covs.shape)
         self.identity_var = torch.eye(self.ae.output_level, dtype=torch.float, device=args.device)
         diag = torch.arange(self.ae.output_level)
         init_covs_diag = init_covs[:, diag, diag].reshape(-1, 1, diag.shape[0])
@@ -125,7 +125,10 @@ class Clustering(nn.Module):
         return q
 
     def get_gceals_q(self, z):
-        '''compute q using softmax of malahalobis'''
+        '''compute q using softmax of Mahalanobis
+           Here, q is actually the P distribution (target) mentioned in the paper
+        '''
+        
         x = z.unsqueeze(dim=1)  # (n, d) -> (n, 1, d)
         centroids = self.centroids
         mu = centroids.unsqueeze(dim=0)  # (k, d) -> (1, k, d)
@@ -138,13 +141,18 @@ class Clustering(nn.Module):
         d2 = d1.matmul(sigma_inv)
         # (n, k, 1, d) \times (n, k, d, 1) -> (n, k, 1, 1) -> (n, k, 1)
         d3 = d2.matmul(d1.transpose(2, 3)).squeeze()
-        # S = softmax of mahalanobis distances
+        # S = softmax of Mahalanobis distances
         d4 = d3.pow(0.5)
         d_final = d4
         softmax_q = F.softmax(-d_final, dim=1)
         
         return softmax_q
-    
+
+    '''
+    Note carefully --
+    q2 is the Q distribution
+    q1 is the P distribution (Target)
+    '''
     def softmax_output(self, z):
         q2 = self.softmax_head(z)
         return q2
@@ -316,7 +324,7 @@ def train(ae_model, data_tensor, y_actual, args):
     
     freeze_z = False
     got_error = False
-    min_w = (1/args.n_clusters) * args.stop_w_factor # default factor = 0.5
+    min_w = (1/args.n_clusters) * args.stop_w_factor # default factor = 0.1
     
     
     for epoch in pbar:
@@ -336,7 +344,7 @@ def train(ae_model, data_tensor, y_actual, args):
             
             w_new = (full_q.sum(dim=0) / (full_q.shape[0])).reshape(1, -1) #/ 100 args.n_clusters*
             w = w if epoch == 0 else w_new
-            print(w)
+            #print(w)
             freeze_z = w.min() <= min_w
             
             if epoch==0 or epoch==args.finetune_epochs or args.plot_all_tsne:
@@ -462,6 +470,7 @@ if __name__ == "__main__":
     # setting the hyper parameters
     import argparse
     from utils.openml import get_data
+    from utils.pickle import save_var
 
     parser = argparse.ArgumentParser(description='train',
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -472,7 +481,7 @@ if __name__ == "__main__":
     parser.add_argument('--batch_size', default=256, type=int)
     parser.add_argument('--latent_dim', default=10, type=int,
                         help='dimension of bottleneck layer')
-    parser.add_argument('--gamma', default=0.0, type=float,
+    parser.add_argument('--gamma', default=0.1, type=float,
                         help='coefficient of clustering loss')
     parser.add_argument('--update_interval', default=1, type=int,
                         help='updates target (P) at set intervals')
@@ -500,7 +509,7 @@ if __name__ == "__main__":
                         help='')
     parser.add_argument('--tsne_dim', default=2, type=int,
                         help='')
-    parser.add_argument('--stop_w_factor', default=0.5, type=float)
+    parser.add_argument('--stop_w_factor', default=0.1, type=float)
     args = parser.parse_args()
     args.dataset = int(args.dataset)
     args.pretrain_epochs = int(args.pretrain_epochs)
@@ -541,7 +550,6 @@ if __name__ == "__main__":
 
     y_pred = full_q.argmax(1).cpu().numpy()
 
-    from utils.pickle import save_var
     save_var(y_pred, f'./predictions/{args.name}.pkl')
 
     end_time = time.time()
