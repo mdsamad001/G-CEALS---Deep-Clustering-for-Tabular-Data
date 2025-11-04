@@ -66,17 +66,12 @@ class Autoencoder(nn.Module):
         x_hat = self.decoder(z)
         return z, x_hat
 
-# subnetwork attached to bottleneck
-#
-
-
 class Clustering(nn.Module):
     def __init__(self, pretrained_autoencoder, n_clusters,
-                 init_centriods=None, init_covs=None, alpha=1, args=None):
+                 init_centriods=None, init_covs=None, args=None):
         super().__init__()
         self.ae = pretrained_autoencoder
         self.n_clusters = n_clusters
-        self.alpha = alpha
         self.args = args
 
         # Initialize learnable parameter cluster centroids
@@ -91,8 +86,7 @@ class Clustering(nn.Module):
                      .unsqueeze(dim=0).repeat(n_clusters, 1, 1)
                      if init_covs == None else init_covs)
         
-
-        #self.diag_mask = torch.eye(self.ae.output_level, device=args.device).unsqueeze(0).expand(init_covs.shape)
+        
         self.identity_var = torch.eye(self.ae.output_level, dtype=torch.float, device=args.device)
         diag = torch.arange(self.ae.output_level)
         init_covs_diag = init_covs[:, diag, diag].reshape(-1, 1, diag.shape[0])
@@ -104,30 +98,23 @@ class Clustering(nn.Module):
         
         activation = nn.ReLU
         
+        """
+        This SOFTMAX HEAD contributes to the Q distribution from the Autoencoder Z space
+        ae.output_level = dimension of the Z or latent space of the autoencoder.
+        """
         self.softmax_head = nn.Sequential(
             nn.Linear(self.ae.output_level, self.ae.output_level),
             activation(),
             nn.Linear(self.ae.output_level, self.n_clusters),
         )
-        
-
     def get_cov(self):
         # Cov = I * softplus(add_var)
         sigma = self.identity_var*F.softplus(self.add_var)
         return sigma
 
-    def get_idec_q(self, z):
-        '''IDEC cluster assignment using t-distribution'''
-        q = 1.0 / (1.0 + torch.sum(torch.pow(z.unsqueeze(1) -
-                   self.centroids, 2), 2) / self.alpha)
-        q = q.pow((self.alpha + 1.0) / 2.0)
-        q = (q.t() / torch.sum(q, 1)).t()
-        return q
-
-    def get_gceals_q(self, z):
-        '''compute q using softmax of Mahalanobis
-           Here, q is actually the P distribution (target) mentioned in the paper
-        '''
+    def get_gceals_target(self, z):
+        
+        '''Compute Target Q using Softmax of Distance between Centroid and Data Points'''
         
         x = z.unsqueeze(dim=1)  # (n, d) -> (n, 1, d)
         centroids = self.centroids
@@ -141,36 +128,41 @@ class Clustering(nn.Module):
         d2 = d1.matmul(sigma_inv)
         # (n, k, 1, d) \times (n, k, d, 1) -> (n, k, 1, 1) -> (n, k, 1)
         d3 = d2.matmul(d1.transpose(2, 3)).squeeze()
-        # S = softmax of Mahalanobis distances
-        d4 = d3.pow(0.5)
-        d_final = d4
-        softmax_q = F.softmax(-d_final, dim=1)
+        # S = softmax of mahalanobis distances
+        d_final = d3.pow(0.5)
         
-        return softmax_q
-
-    '''
-    Note carefully --
-    q2 is the Q distribution
-    q1 is the P distribution (Target)
-    '''
+        softmax_p = F.softmax(-d_final, dim=1)
+        
+        return softmax_p
+    
     def softmax_output(self, z):
-        q2 = self.softmax_head(z)
-        return q2
+        q = self.softmax_head(z)
+        return q
     
     def cluster_output(self, z):
-        q1 = self.get_gceals_q(z)
-        return q1
+        p = self.get_gceals_target(z)
+        return p
 
     def forward(self, x):
         z, x_hat = self.ae(x)
         
-        q1 = self.cluster_output(z)
-        q2 = self.softmax_output(z)
+        """
+        P = Target, Q = Source Distributions 
+        """
+        p = self.cluster_output(z)
+        q = self.softmax_output(z)
             
-        return q1, x_hat, q2
-
+        return p, x_hat, q
+    
+    
+'''
+--> pretain () is used to pretain the autoencoder (standalone), optimizing the reconstruction loss only - inspired by IDEC 
+--> train (): pretained Autoencoder is used in a joint AE + CE cluster training using train ()
+  
+'''
 
 def pretrain(data_tensor, args):
+    
     # Initialize model
     ae_model = Autoencoder(input_level=data_tensor.size()[1],
                            output_level=args.latent_dim).to(args.device)
@@ -196,11 +188,10 @@ def pretrain(data_tensor, args):
     # loss and log
     criterion = nn.MSELoss()
     ae_loss_list = []  # reconstruction loss
-    kl_loss_list = []  # kldiv loss without gamma scale
+  
 
     # prepare for pretraining
-    # lr = args.l_rate
-    lr = 1e-3  # fixed it since we reuse the same pretrained autoencoder model
+    lr = args.l_rate  # default l_rate 1e3 
     optimizer = torch.optim.Adam(ae_model.parameters(), lr=lr)
     pretrain_loader = DataLoader(
         data_tensor, batch_size=args.batch_size, shuffle=True)
@@ -216,13 +207,13 @@ def pretrain(data_tensor, args):
             ae_loss = criterion(x_hat, batch_x)
             
             loss = ae_loss
-
+            
+             # These three lines are needed to train a NN
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             
             ae_loss_list.append(ae_loss.item())
-            kl_loss_list.append(0)
 
             pbar.set_description((
                 f'Pretraining | ae_loss: {ae_loss.item():.5f};'
@@ -247,6 +238,11 @@ def pretrain(data_tensor, args):
 
     return ae_model
 
+
+'''
+    train() takes a pretrained autoencoder and finetunes it using a joint loss = ae_loss + ce_loss
+    
+'''
 
 def train(ae_model, data_tensor, y_actual, args):
     method = 'gceals'
@@ -287,23 +283,26 @@ def train(ae_model, data_tensor, y_actual, args):
                        args=args,
                        ).to(args.device)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.l_rate)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.l_rate) 
     train_loader = 0
     y_pred = 0
     
 
-    # Finetune clustering_model
+    # Loss functions
     criterion = nn.MSELoss()
     ce_criterion = nn.CrossEntropyLoss()
-    nll_criterion = nn.NLLLoss()
-    kl_criterion = nn.KLDivLoss(reduction="batchmean", log_target=False)
+    
+    
+    
+    """
+    Lists and Variables 
+    """
     ae_loss_list = []  # reconstruction loss
-    kl_loss_list = []  # kldiv loss without gamma scale 
     softmax_loss_list = [] # loss from softmax head
     acc_list = []
+    nmi_list = []
+    ari_list = [] 
 
-    x_hat_prev = 0
-    q_prev = 0
     epochs_before_update = args.update_interval
     updates_done = 0
     centroids_t0 = model.centroids.clone().detach()
@@ -311,18 +310,20 @@ def train(ae_model, data_tensor, y_actual, args):
     
     d_mu_steps = []
     w_steps = []
-    det_sigma_steps = []
+    det_sigma_cov_steps = []
     
     det_cov_list = []
     full_z_list = []
     y_pred_list = []
     update_epoch_list = []
-
+        
+        
+    # Intialize cluster priors 1 / K times the number of clusters to get uniform cluster weights 
     pbar = tqdm(range(args.finetune_epochs+1))
     w = torch.tensor([1/args.n_clusters]*args.n_clusters).float().to(args.device)
     w = w.reshape([1, -1])
-    
-    freeze_z = False
+
+    freeze_z = False # Stop factor termination flag to avoid cluster  merging 
     got_error = False
     min_w = (1/args.n_clusters) * args.stop_w_factor # default factor = 0.1
     
@@ -335,19 +336,19 @@ def train(ae_model, data_tensor, y_actual, args):
             epochs_before_update = args.update_interval * 1
             
             with torch.no_grad():
-                full_q, _, full_q2 = model(data_tensor)
+                full_p, _, full_q = model(data_tensor)
                 z, _ = model.ae(data_tensor)
             
             updates_done += 1
 
-            y_pred = full_q.argmax(1).cpu().numpy()
+            y_pred = full_p.argmax(1).cpu().numpy()
             
-            w_new = (full_q.sum(dim=0) / (full_q.shape[0])).reshape(1, -1) #/ 100 args.n_clusters*
+            w_new = (full_p.sum(dim=0) / (full_p.shape[0])).reshape(1, -1) #/ 100 args.n_clusters*
             w = w if epoch == 0 else w_new
-            #print(w)
+            print(w) # Diagonostics 
             freeze_z = w.min() <= min_w
             
-            if epoch==0 or epoch==args.finetune_epochs or args.plot_all_tsne:
+            if epoch==0 or epoch==args.finetune_epochs:
                 if (args.update_interval == 1 and epoch % args.plot_interval == 0):
                     update_epoch_list.append(epoch)
                     full_z_list.append(z.cpu().numpy())
@@ -356,28 +357,51 @@ def train(ae_model, data_tensor, y_actual, args):
                     update_epoch_list.append(epoch)
                     full_z_list.append(z.cpu().numpy())
                     y_pred_list.append(y_pred)
-
+            
+            # Clustering accuracy, NMI, and ARI score computation
             accuracy = metrics.acc(y_actual, y_pred)
+            nmi = metrics.nmi(y_actual, y_pred)
             ari = metrics.ari(y_actual, y_pred)
             acc_list.append(accuracy)
-
+            nmi_list.append(nmi)
+            ari_list.append(ari)
+            
+            # Average mismatch between pred and K-means pred
+            # Mismatch between current and previous predictions
             delta_label = np.sum(y_pred != y_pred_last).astype(
                 np.float32) / y_pred.shape[0]
+            
+            #Update K-means initialized y_pred_last with new y_pred
             y_pred_last = y_pred
             
+            """
+            Measuring centroid updates, w is updating, the determinant of sigma is updating during training
+            """
             centroids_t1 = model.centroids.clone().detach()
             delta_centroids = (centroids_t1-centroids_t0).pow(2).sum(dim=1).cpu().numpy()         
             centroids_t0 = centroids_t1
             
+            ########################## calculate the sigma
+            sum_det_sigma_cov_steps = []
+            det_sigma_cov = torch.linalg.det(model.get_cov().clone().detach()).cpu().numpy()  # | Σ | (K,)
+            det_sigma_cov_steps.append(det_sigma_cov)  
+            sum_det_sigma_cov = det_sigma_cov.sum()  # sum of the determinants of sigma covariances 
+            sum_det_sigma_cov_steps.append(sum_det_sigma_cov)
+            
             d_mu_steps.append(delta_centroids)
             w_steps.append(w.cpu().numpy()[0])
-            det_sigma = torch.linalg.det(model.get_cov().clone().detach()).cpu().numpy()
-            det_sigma_steps.append(det_sigma)
+        
+         
                 
-            # need this manual break to plot last acc point
+           # The model stops training after running for finetune_epochs number of epochs
             if epoch == args.finetune_epochs:
                 break
-                
+            
+            
+            # Stop training when the minor cluster reaches its threshold stop factor
+            '''
+            When Freeze_z = true, minority cluster is merging dangeorusly - should stop
+            '''
             if freeze_z: 
                 update_epoch_list.append(epoch)
                 full_z_list.append(z.cpu().numpy())
@@ -389,24 +413,24 @@ def train(ae_model, data_tensor, y_actual, args):
         
         for batch_x in equal_loader:
                 
-            q, x_hat, q2 = model(batch_x)
+            p, x_hat, q = model(batch_x)
                     
             # scale with cluster ratios
-            q = q.mul(w)
+            p = p.mul(w)
             
 
             ae_loss = criterion(x_hat, batch_x)
                             
             
             ce_loss = torch.tensor(0.0)
-            ce_p = q 
-            ce_loss = ce_criterion(q2, ce_p)
+            ce_p = p 
+            ce_loss = ce_criterion(q, ce_p)
 
             if not got_error and torch.isnan(ce_loss):
                 args.name += 'xxx'
                 got_error = True
 
-            # calculate combined loss using reconstruction loss and KL divergence loss
+            # calculate combined loss using reconstruction loss and KL/CE divergence loss
             loss = ae_loss + (gamma * ce_loss)
             
             ae_loss_list.append(ae_loss.item())
@@ -422,6 +446,7 @@ def train(ae_model, data_tensor, y_actual, args):
             
             z_scaler = preprocessing.StandardScaler()
             z = z_scaler.fit_transform(z.cpu().numpy())
+            
             
             det_cov = []
             
@@ -445,8 +470,6 @@ def train(ae_model, data_tensor, y_actual, args):
                 f'det_cov: {cov_str}; '
             ))
 
-            x_hat_prev = x_hat.detach().cpu()
-            q_prev = q.detach().cpu()
 
         if got_error:
             print("stopping training")
@@ -455,11 +478,10 @@ def train(ae_model, data_tensor, y_actual, args):
         epochs_before_update -= 1
 
     if not args.timed:
-        generate_curves(ae_loss_list, kl_loss_list, softmax_loss_list, acc_list, det_cov_list,
+        generate_curves(ae_loss_list, softmax_loss_list, acc_list, det_cov_list,args,
                         d_mu_steps = d_mu_steps,
-                        det_sigma_steps = det_sigma_steps,
-                        w_steps = w_steps,
-                        args = args)
+                        det_sigma_cov_steps = det_sigma_cov_steps,
+                        w_steps = w_steps)
         plot_tsnes(data_numpy, full_z_list, y_pred_list, y_actual, args, update_epoch_list)
     
 
@@ -470,7 +492,6 @@ if __name__ == "__main__":
     # setting the hyper parameters
     import argparse
     from utils.openml import get_data
-    from utils.pickle import save_var
 
     parser = argparse.ArgumentParser(description='train',
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -487,7 +508,7 @@ if __name__ == "__main__":
                         help='updates target (P) at set intervals')
     parser.add_argument('--finetune_epochs', default=1e3, type=int)
     parser.add_argument('--l_rate', default=0.001, type=float,
-                        help="Learning Rate")
+                        help="Learning Rate default 1e3")
     parser.add_argument('--pretrain_epochs', default=1e3, type=int)
     parser.add_argument('--device', default='cpu', type=str,
                         help="use 'cuda:0' to select cuda devices")
@@ -520,6 +541,10 @@ if __name__ == "__main__":
         torch.set_printoptions(threshold=10_000)
 
     start_time = time.time()
+    
+    if args.latent_dim == 10:
+        print("WARNING: Latent dimension is set to 10 (default). This should be tuned for individual data sets.")
+
 
     X_actual, y_actual = get_data(args.dataset)
     n_classes = len(np.unique(y_actual))
@@ -534,22 +559,25 @@ if __name__ == "__main__":
     
     args.batch_count = np.ceil(X.shape[0] / args.batch_size)
     
-    print(X.shape[0], args.batch_size, X.shape[0]/args.batch_size, args.batch_count)
-
+    print('sample size', X.shape[0], 'batch_size', args.batch_size, 'batch count', args.batch_count)
+    
+    # Pretrain an Autoencoder 
     ae_model = pretrain(data_tensor, args)
-
+    
+    # Finetune the autoencoder with joint clustering loss
     model = train(ae_model, data_tensor, y_actual, args)
 
     # final acc
     model.eval()
     with torch.no_grad():
         z, _ = model.ae(data_tensor)
-        full_q, _, full_q2 = model(data_tensor)
+        full_p, _, full_q = model(data_tensor)
         
     z = z.cpu().numpy()
 
-    y_pred = full_q.argmax(1).cpu().numpy()
+    y_pred = full_p.argmax(1).cpu().numpy()
 
+    from utils.pickle import save_var
     save_var(y_pred, f'./predictions/{args.name}.pkl')
 
     end_time = time.time()
@@ -559,6 +587,7 @@ if __name__ == "__main__":
     ari = metrics.ari(y_actual, y_pred)
 
     print('Dataset:', args.dataset)
+    print('Latent Dimension:', args.latent_dim)
     print('n_samples:', data_tensor.shape[0])
     print('n_features:', data_tensor.shape[1])
     print('n_classes:', n_classes)
