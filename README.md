@@ -15,7 +15,7 @@ Consider tuning the follwing two hyperparameters below :
 Use the follwing format to run this experiment :  
 
 ```bash
-python gceals.py --device cuda:0 --pretrain_epochs 1000 --finetune_epochs 1000 --update_interval 50 --l_rate 0.001 --gamma 0.0 --alpha 0.1  --ce --gceals_q --use_w --update_interval 1 --sigma --test_covs2 --reverse_softplus --name expt_expt-convergence-nostop_final-gceals-l=20_1510_42_09 --seed 42 --latent_dim 15 --dataset 1510
+python gceals.py --device cuda:0 --pretrain_epochs 1000 --finetune_epochs 1000 --l_rate 0.001 --gamma 0.1 --name gceals_default --dataset 1510 --latent_dim 10
 ```
 
 ## Citation
