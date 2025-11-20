@@ -508,8 +508,8 @@ if __name__ == "__main__":
                         help='updates target (P) at set intervals')
     parser.add_argument('--finetune_epochs', default=1e4, type=int)
     parser.add_argument('--l_rate', default=0.00001, type=float,
-                        help="Learning Rate default 1e3")
-    parser.add_argument('--pretrain_epochs', default=1e3, type=int)
+                        help="Learning Rate default 1e-5")
+    parser.add_argument('--pretrain_epochs', default=1e4, type=int)
     parser.add_argument('--device', default='cpu', type=str,
                         help="use 'cuda:0' to select cuda devices")
     parser.add_argument('--name', type=str, default='model',
