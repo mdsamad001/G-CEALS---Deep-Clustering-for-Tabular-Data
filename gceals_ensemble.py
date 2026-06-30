@@ -1,8 +1,3 @@
-# python gceals_ensemble.py --device cuda:0 --pretrain_epochs 10000 --finetune_epochs 10000 --name gceals_31_sw0p1_lre5_bs256 --stop_w_factor 0.1 --l_rate 1e-5 --dataset 31 --save_file_name 31
-# Note: --latent_dim is NOT passed here; the script loops over a list of latent-dimension
-# candidates automatically and ensembles them. --name is a base name; each run is saved as
-# <name>_ld<ld> and the final ensemble as <name>_ensemble. For a local CSV add --data_path <file.csv>.
-
 from functools import partial
 import time
 from utils import metrics
