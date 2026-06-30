@@ -480,7 +480,7 @@ def train(ae_model, data_tensor, y_actual, args):
     if not args.timed:
         generate_curves(ae_loss_list, softmax_loss_list, acc_list, det_cov_list,args,
                         d_mu_steps = d_mu_steps,
-                        det_sigma_cov_steps = det_sigma_cov_steps,
+                        det_sigma_steps = det_sigma_cov_steps,
                         w_steps = w_steps)
         plot_tsnes(data_numpy, full_z_list, y_pred_list, y_actual, args, update_epoch_list)
     
