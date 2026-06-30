@@ -31,4 +31,5 @@ Please cite this paper
 Rabbani, S. B., Medri, I. v., & Samad, M. D. (2025). Deep clustering of tabular data by weighted Gaussian distribution learning. Neurocomputing, 623, 129359. https://doi.org/10.1016/j.neucom.2025.129359
 
 Please cite the paper with the ensemble framework. The paper has been accepted to the IEEE International Conference on Healthcare Informatics (ICHI 2026).
+
 Samad, M. D., Hou, Y., & Ghosh, S. (2026). Mining Electronic Health Records to Investigate Effectiveness of Ensemble Deep Clustering. arXiv preprint arXiv:2604.07085.
